@@ -89,8 +89,13 @@ Borra cualquier contenido previo y pega el siguiente código completo:
 ```powershell
 function npm-safe {
     param(
-        [Parameter(Mandatory=$true)]
-        [string]$Paquete
+        # El nombre del paquete va en la primera posición
+        [Parameter(Mandatory=$true, Position=0)]
+        [string]$Paquete,
+        
+        # Captura cualquier flag adicional (ej: -g, --save-dev)
+        [Parameter(ValueFromRemainingArguments=$true)]
+        [string[]]$Flags
     )
 
     Write-Host "Revisando el historial de '$Paquete' en npm..." -ForegroundColor Cyan
@@ -101,7 +106,7 @@ function npm-safe {
         $fechaPublicacion = [datetime]$respuesta.time.$versionLatest
         $horasTranscurridas = (Get-Date) - $fechaPublicacion
         
-        # Quarantine limit (24 hours)
+        # Límite de cuarentena (24 horas)
         if ($horasTranscurridas.TotalHours -lt 24) {
             Write-Host "---------------------------------------------------" -ForegroundColor Red
             Write-Host "[ALERTA ROJA] Paquete demasiado reciente detectado!" -ForegroundColor Red
@@ -111,9 +116,9 @@ function npm-safe {
             Write-Host "Buscando la ultima version segura disponible..." -ForegroundColor Yellow
             
             $tiempos = $respuesta.time
-            $versiones = $tiempos.psobject.properties | Where-Object { $_.Name -match '^\d+\.\d+\.\d+' }
+            $versiones = $tiempos.psobject.properties | Where-Object { $_.Name -match '^\d+\.\d+\.\d+$' }
             
-            # Filter versions that are at least 24 hours old
+            # Filtrar versiones con más de 24 horas
             $versionesSeguras = $versiones | Where-Object { ((Get-Date) - [datetime]$_.Value).TotalHours -ge 24 } | Sort-Object { [datetime]$_.Value } -Descending
             
             if ($versionesSeguras.Count -gt 0) {
@@ -123,13 +128,18 @@ function npm-safe {
                 Write-Host "[EXITO] Alternativa segura encontrada:" -ForegroundColor Green
                 Write-Host " -> Version a instalar: $versionSegura ($([math]::Round($horasSegura, 1)) horas)" -ForegroundColor Green
                 
-                & "npm.cmd" install "$Paquete@$versionSegura"
+                # Instalar versión segura pasando las flags
+                $argumentos = @("install", "$Paquete@$versionSegura") + $Flags
+                & "npm.cmd" @argumentos
             } else {
                 Write-Host "[ERROR] No se encontro ninguna version con mas de 24 horas. Cancelando." -ForegroundColor Red
             }
         } else {
             Write-Host "La version mas nueva ($versionLatest) es segura ($([math]::Round($horasTranscurridas.TotalHours, 1)) horas). Instalando..." -ForegroundColor Green
-            & "npm.cmd" install $Paquete
+            
+            # Instalar versión más reciente pasando las flags
+            $argumentos = @("install", $Paquete) + $Flags
+            & "npm.cmd" @argumentos
         }
     } catch {
         Write-Host "Error al consultar el paquete. Verifica que el nombre este bien escrito." -ForegroundColor Red
@@ -139,21 +149,36 @@ function npm-safe {
 function Invoke-NpmShield {
     $comando = $args[0]
     
-    # Intercept if command is 'install' or 'i' AND a package is specified
+    # Interceptar si el comando es 'install' o 'i' y hay más de un argumento
     if (($comando -eq 'install' -or $comando -eq 'i') -and $args.Length -gt 1) {
-        Write-Host "[ALTO AHI] La memoria muscular te traiciono." -ForegroundColor Red
-        Write-Host "Recuerda que tienes activa la proteccion contra paquetes nuevos." -ForegroundColor Yellow
         
-        $paqueteSugerido = $args[-1]
-        Write-Host "-> Por favor, ejecuta: npm-safe $paqueteSugerido" -ForegroundColor Cyan
-        return
+        $paquete = $null
+        $flags = @()
+        
+        # Separar inteligentemente cuál es el paquete y cuáles son las flags
+        for ($i = 1; $i -lt $args.Length; $i++) {
+            if ($args[$i] -match '^-') {
+                $flags += $args[$i]
+            } elseif ($null -eq $paquete) {
+                $paquete = $args[$i]
+            }
+        }
+        
+        if ($paquete) {
+            Write-Host "[ALTO AHI] La memoria muscular te traiciono." -ForegroundColor Red
+            Write-Host "Recuerda que tienes activa la proteccion contra paquetes nuevos." -ForegroundColor Yellow
+            
+            # Construir la sugerencia exacta incluyendo las flags
+            $flagsString = if ($flags.Count -gt 0) { " " + ($flags -join " ") } else { "" }
+            Write-Host "-> Por favor, ejecuta: npm-safe $paquete$flagsString" -ForegroundColor Cyan
+            return
+        }
     }
 
-    # For any other command (run, start, test, etc.), execute real npm
+    # Para cualquier otro comando, ejecutar npm real
     & "npm.cmd" @args
 }
 
-# Create a forced global alias to intercept the 'npm' command
 Set-Alias -Name npm -Value Invoke-NpmShield -Scope Global -Force
 ```
 
