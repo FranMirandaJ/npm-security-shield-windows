@@ -15,6 +15,7 @@ Una configuración de seguridad completa para proteger tu estación de trabajo W
   - [Paso 4: Aplicar Cambios](#paso-4-aplicar-cambios)
 - [Uso Diario](#uso-diario)
   - [Instalando Paquetes Nuevos](#instalando-paquetes-nuevos)
+  - [Instalando Paquetes Globales](#instalando-paquetes-globales)
   - [Trabajando con Proyectos Clonados](#trabajando-con-proyectos-clonados)
   - [Paquetes que Requieren Compilación](#paquetes-que-requieren-compilación)
 - [Cómo Funciona](#cómo-funciona)
@@ -41,6 +42,7 @@ El ecosistema de npm enfrenta constantemente ataques donde se publican versiones
 - 🎯 **Bloqueo de versión exacta** - Previene actualizaciones inesperadas
 - 🚫 **Protección contra memoria muscular** - Intercepta comandos `npm install` inseguros
 - ✅ **Flujo de trabajo sin interrupciones** - Funciona con PowerShell y terminal de VS Code
+- 🏴 **Soporte completo de flags** - Compatible con `-g`, `--save-dev`, `--save-optional` y todas las banderas de npm
 
 ---
 
@@ -223,6 +225,28 @@ El guardián:
 
 ---
 
+### Instalando Paquetes Globales
+
+El comando `npm-safe` ahora soporta todas las banderas de npm, incluyendo instalaciones globales:
+
+```powershell
+# Instalación global
+npm-safe @open-wc/building-rollup -g
+
+# Instalación como dependencia de desarrollo
+npm-safe eslint --save-dev
+
+# Instalación como dependencia opcional
+npm-safe sharp --save-optional
+
+# Combinación de flags
+npm-safe typescript -g --force
+```
+
+**Importante**: El sistema reconoce automáticamente las flags y las aplica correctamente, preservando la funcionalidad completa de npm mientras mantiene la protección de seguridad.
+
+---
+
 ### Trabajando con Proyectos Clonados
 
 Cuando descargues un proyecto existente (de la empresa o de terceros) que ya tiene un archivo `package-lock.json`, **no uses** `npm install`. La práctica de seguridad recomendada es:
@@ -237,11 +261,84 @@ Este comando borra la carpeta `node_modules` e instala las versiones exactas fir
 
 ### Paquetes que Requieren Compilación
 
-Debido a que bloqueamos los scripts globales con `ignore-scripts=true`, algunas librerías legítimas que compilan binarios nativos (ej., `esbuild`, `sass`, `cypress`) pueden requerir un paso extra después de la instalación segura. Si notas que una herramienta no funciona, compílala manualmente después de validar que es segura:
+Debido a que bloqueamos los scripts globales con `ignore-scripts=true`, algunas librerías legítimas que compilan binarios nativos (como `esbuild`, `sass`, `cypress`, `@open-wc/building-rollup`) pueden requerir un paso extra después de la instalación segura.
+
+#### Síntoma del Problema
+
+Si después de instalar un paquete global con `npm-safe` obtienes un error al ejecutarlo como:
+
+```
+Error: Cannot find module 'xyz'
+command not found: xyz
+```
+
+O el paquete simplemente no funciona correctamente, es probable que necesite compilación.
+
+#### Solución: Permitir Scripts para Paquetes Específicos
+
+**Opción 1: Reconstruir el paquete específico** (Recomendado)
+
+Después de instalar el paquete con `npm-safe`, ejecuta:
 
 ```powershell
 npm rebuild nombre-del-paquete
 ```
+
+**Ejemplo real con @open-wc/building-rollup:**
+
+```powershell
+# 1. Instalar de forma segura
+npm-safe @open-wc/building-rollup -g
+
+# 2. Reconstruir para permitir la compilación
+npm rebuild @open-wc/building-rollup
+
+# 3. Ahora el comando funcionará correctamente
+```
+
+**Opción 2: Excluir paquetes específicos de la restricción global**
+
+Si un paquete en particular es de confianza y necesitas permitir sus scripts permanentemente:
+
+```bash
+# Configurar excepciones para paquetes específicos
+npm config set ignore-scripts false --location=project
+
+# O permitir scripts solo para ese paquete usando .npmrc en tu proyecto
+echo "ignore-scripts=true" >> .npmrc
+echo "@open-wc:ignore-scripts=false" >> .npmrc
+```
+
+**Opción 3: Instalación manual bypass (último recurso)**
+
+Si necesitas instalar un paquete urgentemente y estás seguro de su legitimidad:
+
+```powershell
+# Temporalmente deshabilitar la protección
+npm config set ignore-scripts false
+
+# Instalar el paquete
+npm.cmd install nombre-del-paquete -g
+
+# Restaurar la protección inmediatamente
+npm config set ignore-scripts true
+```
+
+> ⚠️ **Advertencia**: Solo usa la Opción 3 cuando estés completamente seguro de la confiabilidad del paquete.
+
+#### Lista de Paquetes Comunes que Requieren Rebuild
+
+Estos paquetes legítimos comúnmente necesitan `npm rebuild` después de instalarse:
+
+- `@open-wc/building-rollup` - Herramientas de build para Web Components
+- `esbuild` - Bundler y minificador ultrarrápido
+- `sass`, `node-sass` - Preprocesador CSS
+- `cypress` - Framework de testing E2E
+- `puppeteer` - Automatización de Chrome
+- `sharp` - Procesamiento de imágenes
+- `sqlite3` - Base de datos SQLite
+- `bcrypt` - Hashing de contraseñas
+- `canvas` - Generación de imágenes en Node.js
 
 ---
 
@@ -259,22 +356,87 @@ npm rebuild nombre-del-paquete
 - Aplica período de cuarentena de 24 horas
 - Auto-selecciona la última versión segura si la más reciente es muy nueva
 - Permite comandos npm normales (`npm start`, `npm test`, etc.)
+- Soporta todas las flags de npm (`-g`, `--save-dev`, `--force`, etc.)
 
 ---
 
 ## 🐛 Solución de Problemas
 
-**Problema**: PowerShell dice "la ejecución de scripts está deshabilitada"
-- **Solución**: Ejecuta el Paso 2 nuevamente con privilegios de administrador
+### Problema: PowerShell dice "la ejecución de scripts está deshabilitada"
+**Solución**: Ejecuta el Paso 2 nuevamente con privilegios de administrador:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+```
 
-**Problema**: Comando `npm-safe` no encontrado
-- **Solución**: Ejecuta `. $PROFILE` para recargar tu perfil de PowerShell
+---
 
-**Problema**: El paquete requiere compilación pero falla al ejecutarse
-- **Solución**: Usa `npm rebuild nombre-del-paquete` después de la instalación
+### Problema: Comando `npm-safe` no encontrado
+**Solución**: Ejecuta `. $PROFILE` para recargar tu perfil de PowerShell:
+```powershell
+. $PROFILE
+```
 
-**Problema**: Quiero instalar un paquete publicado hace menos de 24 horas
-- **Solución**: Verifica manualmente la seguridad del paquete, luego usa `npm.cmd install nombre-paquete@version` para saltarte el guardián
+---
+
+### Problema: El paquete global se instaló pero no funciona al ejecutarlo
+**Causa**: El paquete requiere compilación de binarios nativos, pero `ignore-scripts=true` bloqueó el proceso.
+
+**Solución**: Usa `npm rebuild` después de la instalación:
+```powershell
+npm rebuild nombre-del-paquete
+```
+
+**Ejemplo completo**:
+```powershell
+# Instalación
+npm-safe esbuild -g
+
+# Si falla al ejecutar, reconstruir
+npm rebuild esbuild
+
+# Ahora debería funcionar
+esbuild --version
+```
+
+---
+
+### Problema: Necesito instalar un paquete publicado hace menos de 24 horas
+**Solución**: Verifica manualmente la seguridad del paquete en:
+- https://npmjs.com/package/nombre-paquete (verificar autor, descargas, actividad)
+- https://socket.dev/ (análisis de seguridad)
+- https://snyk.io/vuln/ (vulnerabilidades conocidas)
+
+Luego usa bypass directo:
+```powershell
+npm.cmd install nombre-paquete@version
+```
+
+---
+
+### Problema: Instalación global con `-g` no funciona
+**Causa**: Probablemente usaste el alias bloqueado `npm install -g`.
+
+**Solución**: Usa `npm-safe` que ahora soporta todas las flags:
+```powershell
+npm-safe nombre-paquete -g
+```
+
+---
+
+### Problema: El guardián no detecta mi intento de `npm install`
+**Causa**: Puede que el perfil no esté cargado o el alias no esté activo.
+
+**Solución**: Recarga el perfil:
+```powershell
+. $PROFILE
+```
+
+Verifica el alias:
+```powershell
+Get-Alias npm
+```
+
+Deberías ver: `Invoke-NpmShield`
 
 ---
 
@@ -291,6 +453,19 @@ Esta configuración se proporciona tal cual para fines de refuerzo de seguridad.
 - Revisa las dependencias de los paquetes regularmente
 - Mantén tus versiones de npm y Node.js actualizadas
 - Considera usar herramientas adicionales como `npm audit` regularmente
+- Los paquetes que requieren `npm rebuild` son legítimos, pero **siempre verifica primero** en npm, Socket.dev o Snyk antes de reconstruir
+
+---
+
+## 🔍 Recursos de Verificación de Seguridad
+
+Antes de permitir scripts o reconstruir un paquete, verifica su seguridad en:
+
+- **npm oficial**: https://www.npmjs.com/package/NOMBRE_PAQUETE
+- **Socket.dev**: https://socket.dev/npm/package/NOMBRE_PAQUETE
+- **Snyk Advisor**: https://snyk.io/advisor/npm-package/NOMBRE_PAQUETE
+- **GitHub Repository**: Revisa el código fuente del paquete
+- **npm audit**: Ejecuta `npm audit` regularmente en tus proyectos
 
 ---
 
